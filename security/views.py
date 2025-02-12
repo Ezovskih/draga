@@ -1,9 +1,12 @@
 import json
-import requests
+from http import HTTPStatus
+from django.shortcuts import render, redirect
 from django.http import JsonResponse
 from django.views import View
 
-from app import settings
+from app.forms import RequestCodeForm
+from app.tasks import send_code_task
+
 from security.models import VerifyCode
 
 
@@ -15,6 +18,11 @@ def get_code(minimum = 1000, maximum = 9999) -> str:
 
 class SendCodeView(View):
 
+    def get(self, request):
+        form = RequestCodeForm()  # создаем пустую форму
+        return render(request, 'request_code_form.html', {'form': form})
+
+
     def post(self, request):
         try:
             data = json.loads(request.body)
@@ -22,31 +30,18 @@ class SendCodeView(View):
             transport_type = data['transport_type']
             who_called = data['who_called']
         except KeyError:
-            return JsonResponse({'error': "Некорректные параметры запроса!"}, status=400)
+            return JsonResponse({'error': "Некорректные параметры запроса!"}, status=HTTPStatus.BAD_REQUEST)  # 400
 
         code = get_code()  # генерируем проверочный код
 
-        # Отправка кода на сторонний API
+        # Отправляем код выбранным способом
         if transport_type == 'sms':
-            try:
-                response = requests.post(
-                    settings.API_ADDRESS_URL,
-                    json={
-                        'user': settings.API_USER_NAME,
-                        'pass': settings.API_PASS_WORD,
-                        'target': address,
-                        'message': f"Ваш проверочный код: {code}"
-                    }
-                )
-            except json.JSONDecodeError:
-                return JsonResponse({'error': "Некорректный JSON!"}, status=400)
-
-            if response.status_code != 200:
-                return JsonResponse({'error': "Ошибка отправки СМС-сообщения!"}, status=500)
+            job = send_code_task.delay(address, code)  # ставим в очередь задачу
+            print("CREATED JOB ID: ", job.id)
         elif transport_type == 'email':
             pass  # TODO реализовать отправку e-mail
         else:
-            return JsonResponse({'error': "Некорректный тип транспорта!"}, status=400)
+            return JsonResponse({'error': "Некорректный тип транспорта!"}, status=HTTPStatus.BAD_REQUEST)
 
         # Сохраняем код в базу данных
         VerifyCode.objects.create(
@@ -56,4 +51,4 @@ class SendCodeView(View):
             code=code
         )
 
-        return JsonResponse({'code': code})
+        return JsonResponse({'code': code}, status=HTTPStatus.ACCEPTED)  # 202
