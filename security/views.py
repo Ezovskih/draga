@@ -1,6 +1,6 @@
 import json
 from http import HTTPStatus
-from django.shortcuts import render, redirect
+from django.shortcuts import render
 from django.http import JsonResponse
 from django.views import View
 
@@ -12,8 +12,8 @@ from security.models import VerifyCode
 
 def get_code(minimum = 1000, maximum = 9999) -> str:
     """Генерация (строки) числового кода"""
-    from random import randint
-    return str(randint(minimum, maximum))
+    from secrets import choice
+    return str(choice(range(minimum, maximum + 1)))
 
 
 class SendCodeView(View):
